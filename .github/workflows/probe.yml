@@ -1,0 +1,52 @@
+name: probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "read | panel"
+        required: true
+        default: read
+
+concurrency:
+  group: probe-${{ github.event.inputs.mode }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: setup
+        run: |
+          cd probe
+          npm init -y >/dev/null 2>&1
+          npm i --silent --no-audit --no-fund playwright@1.47.2 >/dev/null 2>&1
+          npx playwright install --with-deps chromium >/dev/null 2>&1
+          echo "runner ip: $(curl -fsS -m 10 https://api.ipify.org || echo ?)"
+      - name: read
+        if: ${{ github.event.inputs.mode == 'read' }}
+        run: node probe/read.mjs
+      - name: panel
+        if: ${{ github.event.inputs.mode == 'panel' }}
+        run: |
+          umask 077
+          K="$RUNNER_TEMP/k.pem"
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$K" 2>/dev/null
+          echo "PUBKEY-BEGIN"
+          openssl pkey -in "$K" -pubout | grep -v -- '-----' | tr -d '\n'; echo
+          echo "PUBKEY-END"
+          F="drop/${GITHUB_RUN_ID}.json"
+          for i in $(seq 1 90); do
+            if git fetch -q --depth 1 origin probe-drop 2>/dev/null && git show FETCH_HEAD:"$F" > "$RUNNER_TEMP/blob.json" 2>/dev/null; then
+              echo "blob received"; break
+            fi
+            sleep 10
+          done
+          [ -s "$RUNNER_TEMP/blob.json" ] || { echo "no blob"; exit 1; }
+          KEY_FILE="$K" BLOB_FILE="$RUNNER_TEMP/blob.json" node probe/panel.mjs
+          rm -f "$K" "$RUNNER_TEMP/blob.json"
