@@ -7,6 +7,9 @@ on:
         description: "read | panel"
         required: true
         default: read
+  push:
+    branches: [main]
+    paths: [probe/run-panel.txt]
 
 concurrency:
   group: probe-${{ github.event.inputs.mode }}
@@ -14,6 +17,7 @@ concurrency:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   probe:
@@ -32,9 +36,21 @@ jobs:
         if: ${{ github.event.inputs.mode == 'read' }}
         run: node probe/read.mjs
       - name: panel
-        if: ${{ github.event.inputs.mode == 'panel' }}
+        if: ${{ github.event_name == 'push' || github.event.inputs.mode == 'panel' }}
+        # Cookies come from the Cloudflare worker only after it verifies this job's GitHub OIDC token
+        # (repo, branch main, this workflow file). They are never printed or stored in the repo.
         env:
-          TOROB_COOKIES: ${{ secrets.TOROB_COOKIES }}
+          W: https://torob-browser-connector.shazdeh-2009.workers.dev
         run: |
-          [ -n "$TOROB_COOKIES" ] || { echo "secret TOROB_COOKIES is not set"; exit 1; }
-          node probe/panel.mjs
+          set -uo pipefail
+          tok() { curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=torob-panel-probe" | jq -r .value; }
+          code=$(curl -sS -o /tmp/ck.json -w '%{http_code}' -X POST -H "Authorization: Bearer $(tok)" "$W/gh-oidc/cookies")
+          echo "cookie fetch status=$code"
+          if [ "$code" = "200" ]; then
+            TOROB_COOKIES="$(cat /tmp/ck.json)" node probe/panel.mjs > /tmp/out.txt 2>&1 || echo "panel.mjs exit=$?" >> /tmp/out.txt
+          else
+            echo "cookie fetch failed status=$code" > /tmp/out.txt
+          fi
+          rm -f /tmp/ck.json
+          cat /tmp/out.txt
+          jq -Rs '{out:.}' /tmp/out.txt | curl -sS -o /dev/null -w 'result post status=%{http_code}\n' -X POST -H "Authorization: Bearer $(tok)" -H 'Content-Type: application/json' --data-binary @- "$W/gh-oidc/result"
