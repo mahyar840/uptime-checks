@@ -1,0 +1,41 @@
+name: panel-relay
+
+# Tehran time (UTC+3:30): 06:00, 09:30, 12:30, 15:30, 18:30, 21:30
+on:
+  schedule:
+    - cron: '30 2 * * *'
+    - cron: '0 6 * * *'
+    - cron: '0 9 * * *'
+    - cron: '0 12 * * *'
+    - cron: '0 15 * * *'
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [relay/run-now.txt]
+
+concurrency:
+  group: panel-relay
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - name: setup
+        run: |
+          cd relay
+          npm init -y >/dev/null 2>&1
+          npm i --silent --no-audit --no-fund playwright@1.47.2 >/dev/null 2>&1
+          npx playwright install --with-deps chromium >/dev/null 2>&1
+      - name: relay
+        env:
+          W: https://torob-browser-connector.shazdeh-2009.workers.dev
+          DUR_MIN: ${{ github.event_name == 'push' && '8' || '45' }}
+        run: node relay/relay.mjs
