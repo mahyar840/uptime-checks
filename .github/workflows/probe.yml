@@ -33,20 +33,8 @@ jobs:
         run: node probe/read.mjs
       - name: panel
         if: ${{ github.event.inputs.mode == 'panel' }}
+        env:
+          TOROB_COOKIES: ${{ secrets.TOROB_COOKIES }}
         run: |
-          umask 077
-          K="$RUNNER_TEMP/k.pem"
-          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$K" 2>/dev/null
-          echo "PUBKEY-BEGIN"
-          openssl pkey -in "$K" -pubout | grep -v -- '-----' | tr -d '\n'; echo
-          echo "PUBKEY-END"
-          F="drop/${GITHUB_RUN_ID}.json"
-          for i in $(seq 1 90); do
-            if git fetch -q --depth 1 origin probe-drop 2>/dev/null && git show FETCH_HEAD:"$F" > "$RUNNER_TEMP/blob.json" 2>/dev/null; then
-              echo "blob received"; break
-            fi
-            sleep 10
-          done
-          [ -s "$RUNNER_TEMP/blob.json" ] || { echo "no blob"; exit 1; }
-          KEY_FILE="$K" BLOB_FILE="$RUNNER_TEMP/blob.json" node probe/panel.mjs
-          rm -f "$K" "$RUNNER_TEMP/blob.json"
+          [ -n "$TOROB_COOKIES" ] || { echo "secret TOROB_COOKIES is not set"; exit 1; }
+          node probe/panel.mjs

@@ -1,14 +1,6 @@
 import { chromium } from 'playwright';
-import { readFileSync } from 'node:fs';
-import crypto from 'node:crypto';
-// Decrypt hybrid blob (RSA-OAEP-SHA256 wrapped AES-256-GCM). Cookie values are never printed.
-const priv = readFileSync(process.env.KEY_FILE, 'utf8');
-const blob = JSON.parse(readFileSync(process.env.BLOB_FILE, 'utf8'));
-const aesKey = crypto.privateDecrypt({ key: priv, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' }, Buffer.from(blob.k, 'base64'));
-const ct = Buffer.from(blob.c, 'base64');
-const d = crypto.createDecipheriv('aes-256-gcm', aesKey, Buffer.from(blob.iv, 'base64'));
-d.setAuthTag(ct.subarray(ct.length - 16));
-const raw = JSON.parse(Buffer.concat([d.update(ct.subarray(0, ct.length - 16)), d.final()]).toString('utf8'));
+// Cookies come from the TOROB_COOKIES secret (JSON array). Values are never printed.
+const raw = JSON.parse(process.env.TOROB_COOKIES);
 const cookies = raw.filter(c => /torob\.com$/.test(c.domain)).map(c => ({
   name: c.name, value: c.value, domain: c.domain, path: c.path || '/',
   expires: (c.session || !c.expires || c.expires < 0) ? -1 : Math.floor(c.expires),
