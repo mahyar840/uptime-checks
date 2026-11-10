@@ -51,3 +51,5 @@ jobs:
           gh workflow run check.yml --ref main -R "$GITHUB_REPOSITORY"
           # panel relay: the worker decides whether a session is due (>=150 min since the last one, 06-23 Tehran)
           gh workflow run panel-relay.yml --ref main -f auto=1 -R "$GITHUB_REPOSITORY" || true
+          # image text check (OCR): keeps itself going; this restarts it if it ever stopped
+          gh workflow run imgcheck.yml --ref main -R "$GITHUB_REPOSITORY" || true

@@ -15,6 +15,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   imgcheck:
@@ -41,3 +42,9 @@ jobs:
           echo "::add-mask::$U"
           echo "::add-mask::$K"
           python img/check.py
+
+      - name: next
+        if: ${{ !cancelled() && (github.event.inputs.seconds || '3000') == '3000' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run imgcheck.yml --ref main -R "$GITHUB_REPOSITORY" || true
