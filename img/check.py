@@ -2,6 +2,7 @@
 # (no AI service, no paid API) and posts back the texts it found with their boxes (in percent).
 # The worker decides what counts as a foreign watermark. Nothing secret is printed.
 import io, json, os, re, sys, time, urllib.request
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 from PIL import Image, ImageOps
@@ -25,6 +26,66 @@ def http(method, path, body=None, timeout=40):
                                  data=None if body is None else json.dumps(body).encode())
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode() or "{}")
+
+def put(kind, url, data, **extra):
+    """Sends raw image bytes (no JSON) with its details in the query string."""
+    from urllib.parse import urlencode
+    q = urlencode(dict(kind=kind, url=url, **extra))
+    req = urllib.request.Request(U + "/gh/img-put?" + q, method="POST", data=data or b"",
+                                 headers={"x-check-key": K, "Content-Type": "application/octet-stream", "User-Agent": "imgcheck"})
+    with urllib.request.urlopen(req, timeout=90) as r:
+        return json.loads(r.read().decode() or "{}")
+
+_logos = None
+def logos():
+    """Shop logos come from the worker (kept out of this public repo)."""
+    global _logos
+    if _logos is None:
+        import base64
+        _logos = {}
+        try:
+            j = http("GET", "/gh/img-logos")
+            for k in ("kb", "s3"):
+                if j.get(k):
+                    _logos[k] = Image.open(io.BytesIO(base64.b64decode(j[k]))).convert("RGBA")
+        except Exception as e:
+            print("logos error", str(e)[:60])
+    return _logos
+
+def do_stamp(url, site, data):
+    import stamp as st
+    lg = logos().get(site)
+    if lg is None:
+        return False
+    im = Image.open(io.BytesIO(data)); im = ImageOps.exif_transpose(im)
+    if im.mode in ("RGBA", "LA", "P"):
+        im = im.convert("RGBA"); bg = Image.new("RGB", im.size, (255, 255, 255)); bg.paste(im, mask=im.split()[-1]); im = bg
+    out, _ = st.stamp(im.convert("RGB"), lg)
+    put("stamp", url, st.to_jpeg(out), site=site)
+    return True
+
+def do_clean(task):
+    """Removes the given boxes with LaMa, reads the result again and sends both to the worker (it decides)."""
+    import lama, stamp as st
+    url = task.get("url")
+    try:
+        data = download(url)
+        im = Image.open(io.BytesIO(data)); im = ImageOps.exif_transpose(im).convert("RGB")
+        w, h = im.size
+        s = 1000 / max(w, h)
+        if s < 1: im = im.resize((round(w * s), round(h * s)), Image.LANCZOS)
+        out, info = lama.inpaint(im, task.get("boxes") or [])
+        if not info.get("ok"):
+            put("cleanfail", url, b"", err=info.get("err", "inpaint")); return "fail: " + info.get("err", "")
+        jpg = st.to_jpeg(out, quality=90)
+        after = check_bytes(jpg)["marks"]
+        m = json.dumps([{"text": x["text"], "box": x["box"]} for x in after[:25]], ensure_ascii=False)
+        r = put("clean", url, jpg, m=m)
+        return "sent pass=%s" % r.get("pass")
+    except Exception as e:
+        try: put("cleanfail", url, b"", err=str(e)[:150])
+        except Exception: pass
+        return "error: " + str(e)[:80]
 
 def download(url):
     last = None
@@ -111,9 +172,14 @@ def check_bytes(data):
     marks = sorted(found.values(), key=lambda m: -m["score"])[:40]
     return {"ok": True, "w": im.size[0], "h": im.size[1], "marks": marks}
 
-def check_url(url):
+def check_url(url, stamp_site=None):
     try:
-        r = check_bytes(download(url))
+        data = download(url)
+        r = check_bytes(data)
+        if stamp_site:
+            # the logo-stamped copy goes first, so it is there when the worker reads the verdict
+            try: do_stamp(url, stamp_site, data)
+            except Exception as e: print("stamp error", str(e)[:60])
     except Exception as e:
         r = {"ok": False, "err": str(e)[:100], "marks": []}
     r["url"] = url
@@ -141,13 +207,18 @@ def main():
             q = http("GET", "/gh/img-queue")
         except Exception as e:
             print("queue error", str(e)[:60]); time.sleep(60); continue
-        urls = (q or {}).get("urls") or []
-        if not urls:
-            time.sleep(IDLE_SLEEP); continue
+        tasks = (q or {}).get("tasks") or [{"url": u} for u in ((q or {}).get("urls") or [])]
+        cleans = (q or {}).get("cleans") or []
+        for c in cleans[:3]:
+            t1 = time.time()
+            print("clean:", do_clean(c), "%.1fs" % (time.time() - t1))
+        if not tasks:
+            if not cleans: time.sleep(IDLE_SLEEP)
+            continue
         items = []
         t0 = time.time()
-        for u in urls[:20]:
-            items.append(check_url(u))
+        for t in tasks[:20]:
+            items.append(check_url(t.get("url"), t.get("stamp")))
         try:
             http("POST", "/gh/img-result", {"items": items})
             done += len(items)

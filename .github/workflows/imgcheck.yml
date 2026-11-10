@@ -33,6 +33,15 @@ jobs:
           sudo apt-get update -qq >/dev/null 2>&1 || true
           sudo apt-get install -y -qq tesseract-ocr tesseract-ocr-fas >/dev/null 2>&1 || echo "tesseract not installed (persian words skipped)"
           pip install -q -r img/requirements.txt
+      - name: model cache
+        uses: actions/cache@v4
+        with:
+          path: img/lama_fp32.onnx
+          key: lama-onnx-fp32-v1
+      - name: model
+        run: |
+          [ -s img/lama_fp32.onnx ] || curl -fsSL --retry 3 -o img/lama_fp32.onnx "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx" || echo "model download failed (cleaning skipped)"
+          ls -la img/ | head -20
       - name: check
         env:
           CFG: ${{ secrets.CHECK_CONFIG }}
