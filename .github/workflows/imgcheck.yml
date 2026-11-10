@@ -1,0 +1,43 @@
+name: imgcheck
+
+# Reads product-image URLs from a queue and reports the text found on each image (OCR on the runner).
+on:
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "how long to keep polling the queue"
+        required: false
+        default: "3000"
+
+concurrency:
+  group: imgcheck
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  imgcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: img/requirements.txt
+      - name: setup
+        run: |
+          sudo apt-get update -qq >/dev/null 2>&1 || true
+          sudo apt-get install -y -qq tesseract-ocr tesseract-ocr-fas >/dev/null 2>&1 || echo "tesseract not installed (persian words skipped)"
+          pip install -q -r img/requirements.txt
+      - name: check
+        env:
+          CFG: ${{ secrets.CHECK_CONFIG }}
+          RUN_SECONDS: ${{ github.event.inputs.seconds || '3000' }}
+        run: |
+          export U="${CFG%%|*}" K="${CFG#*|}"
+          echo "::add-mask::$U"
+          echo "::add-mask::$K"
+          python img/check.py

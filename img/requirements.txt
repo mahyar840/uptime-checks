@@ -1,0 +1,4 @@
+rapidocr-onnxruntime==1.2.3
+pillow
+numpy<2.3
+pytesseract
