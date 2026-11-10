@@ -16,7 +16,8 @@ async function oidc() {
   return (await r.json()).value;
 }
 
-const sr = await fetch(W + '/gh-oidc/session', { method: 'POST', headers: { Authorization: 'Bearer ' + (await oidc()) } });
+const sr = await fetch(W + '/gh-oidc/session' + (process.env.AUTO === '1' ? '?auto=1' : ''), { method: 'POST', headers: { Authorization: 'Bearer ' + (await oidc()) } });
+if (sr.status === 409) { console.log('skip: ' + (await sr.text())); process.exit(0); }
 if (sr.status !== 200) { console.log('session failed status=' + sr.status); process.exit(1); }
 const sess = await sr.json();
 const H = { 'x-relay-key': sess.key, 'Content-Type': 'application/json' };
