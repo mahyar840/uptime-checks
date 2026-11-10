@@ -127,7 +127,16 @@ def main():
         return
     end = time.time() + RUN_SECONDS
     done = 0
+    next_tick = 0
     while time.time() < end:
+        # every few minutes: let the worker retry products that were waiting for an image check
+        if time.time() >= next_tick:
+            try:
+                t = http("POST", "/gh/img-tick", {}, timeout=170)
+                next_tick = time.time() + (60 if (t or {}).get("left") else 240)
+                if (t or {}).get("ran"): print("tick ran one job, left", t.get("left"))
+            except Exception as e:
+                print("tick error", str(e)[:60]); next_tick = time.time() + 240
         try:
             q = http("GET", "/gh/img-queue")
         except Exception as e:
