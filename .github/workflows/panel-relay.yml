@@ -3,17 +3,19 @@ name: panel-relay
 # Tehran time (UTC+3:30) windows: 06:00, 09:30, 12:30, 15:30, 18:30, 21:30.
 # GitHub often starts scheduled runs late or skips them, so each window has several attempts;
 # the worker refuses a second session within 120 minutes, so extra attempts exit in seconds.
-# After every completed "check" run we also try once (AUTO=1): it only starts a session if no relay
-# ran in the last 150 minutes and it is 06:00-22:59 in Tehran.
+# check.yml dispatches this workflow with auto=1 at the end of every run (about hourly); the worker only starts a session if no relay
+# ran in the last 150 minutes and it is 06:00-22:59 in Tehran. GitHub schedules rarely fire for this repo.
 on:
   schedule:
     - cron: '17,27,42,57 2 * * *'
     - cron: '47,57 5,8,11,14,17 * * *'
     - cron: '12,27 6,9,12,15,18 * * *'
-  workflow_run:
-    workflows: [check]
-    types: [completed]
   workflow_dispatch:
+    inputs:
+      auto:
+        description: "1 = only run if a relay is due (dispatched by check.yml)"
+        required: false
+        default: "0"
   push:
     branches: [main]
     paths: [relay/run-now.txt]
@@ -41,8 +43,8 @@ jobs:
       - name: relay
         env:
           W: https://torob-browser-connector.shazdeh-2009.workers.dev
-          DUR_MIN: ${{ github.event_name == 'push' && '8' || '45' }}
-          AUTO: ${{ github.event_name == 'workflow_run' && '1' || '0' }}
+          DUR_MIN: '45'
+          AUTO: ${{ inputs.auto == '1' && '1' || '0' }}
         run: |
           node relay/relay.mjs > /tmp/relay.log 2>&1; rc=$?
           cat /tmp/relay.log
